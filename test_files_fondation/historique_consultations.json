@@ -1,0 +1,8 @@
+{
+  "hopital": "Fondation Cheikh Zayed",
+  "departement": "Pédiatrie",
+  "consultations": [
+    {"date": "2026-01-10", "medecin": "Dr. Tazi", "motif": "Fièvre"},
+    {"date": "2026-03-05", "medecin": "Dr. Tazi", "motif": "Vaccination de routine"}
+  ]
+}

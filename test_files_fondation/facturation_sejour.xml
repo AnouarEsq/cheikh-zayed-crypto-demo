@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<facture>
+    <hopital>Fondation Cheikh Zayed</hopital>
+    <patient>ID_9984</patient>
+    <montant>15000.00</montant>
+    <devise>MAD</devise>
+    <details>
+        <item nom="Chambre standard (3 nuits)" prix="3000.00" />
+        <item nom="Intervention Chirurgicale" prix="10000.00" />
+        <item nom="Frais de Pharmacie" prix="2000.00" />
+    </details>
+</facture>

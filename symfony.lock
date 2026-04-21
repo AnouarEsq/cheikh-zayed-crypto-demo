@@ -1,0 +1,48 @@
+{
+    "doctrine/deprecations": {
+        "version": "1.1",
+        "recipe": {
+            "version": "1.0"
+        }
+    },
+    "doctrine/doctrine-bundle": {
+        "version": "3.2.2"
+    },
+    "doctrine/doctrine-migrations-bundle": {
+        "version": "4.0.0"
+    },
+    "symfony/console": {
+        "version": "8.0",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "5.3",
+            "ref": "1781ff40d8a17d87cf53f8d4cf0c8346ed2bb461"
+        },
+        "files": [
+            "./bin/console"
+        ]
+    },
+    "symfony/flex": {
+        "version": "2.10",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "2.4",
+            "ref": "52e9754527a15e2b79d9a610f98185a1fe46622a"
+        },
+        "files": [
+            "./.env",
+            "./.env.dev"
+        ]
+    },
+    "symfony/framework-bundle": {
+        "version": "v8.0.8"
+    },
+    "symfony/routing": {
+        "version": "8.0",
+        "recipe": {
+            "version": "7.4"
+        }
+    }
+}

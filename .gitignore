@@ -1,0 +1,10 @@
+vendor/
+var/
+.env.local
+.env.*.local
+config/jwt/*.pem
+uploads/
+/public/bundles/
+/var/
+/vendor/
+.phpunit.result.cache

@@ -1,0 +1,8 @@
+BLOC OPÉRATOIRE - SALLE 4
+Intervention: Cholecystectomie laparoscopique
+Début: 10h15
+Fin: 11h30
+Chirurgien: Dr. Boujida
+Anesthésiste: Dr. Naciri
+
+Notes de l'intervention: L'intervention s'est déroulée sans complications. La vésicule présentait une inflammation chronique avec présence de multiples calculs. Ablation réussie, hémostase soigneuse. Transfert en salle de réveil à 11h40, patient stable.

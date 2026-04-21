@@ -1,0 +1,5 @@
+Fondation Cheikh Zayed
+Service: Cardiologie
+Patient ID: 100452
+Nom: ALAMI Ahmed
+Notes: Patient admis pour arythmie cardiaque. Antécédents d'hypertension. Traitement prescrit.
