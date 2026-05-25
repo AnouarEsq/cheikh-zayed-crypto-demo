@@ -16,6 +16,18 @@ Veuillez vous référer au document détaillé : [Explication technique de l'Arc
 
 ## 🛠️ Installation Locale (Pour Test ou Examen)
 
+### Prérequis PHP
+
+Ce projet exige les extensions PHP suivantes :
+
+- `ext-openssl`
+- `ext-mbstring`
+- `ext-curl`
+- `ext-ctype`
+- `ext-iconv`
+
+Pour les tests, `phpunit/phpunit` est installé en tant que dépendance de développement.
+
 1. **Cloner le dépôt :**
    ```bash
    git clone [LIEN_DU_REPO]
@@ -28,7 +40,7 @@ Veuillez vous référer au document détaillé : [Explication technique de l'Arc
    ```
 
 3. **Environnement :**
-   Copiez le fichier de template `.env.example` et renommez-le en `.env`. 
+   Copiez le fichier de template `.env.example` et renommez-le en `.env`.
    *(Les clés privées/publiques RSA utiles pour la démo seront générées à la volée s'il n'y en a pas).*
 
 4. **Lancer le serveur de démonstration :**
@@ -38,3 +50,51 @@ Veuillez vous référer au document détaillé : [Explication technique de l'Arc
 
 5. **Accéder à l'interface :**
    Ouvrez le navigateur à l'adresse : [http://localhost:8000](http://localhost:8000)
+
+## Déploiement Docker
+
+1. Construire l'image :
+   ```bash
+docker build -t encryption-demo:latest .
+```
+2. Lancer le conteneur :
+   ```bash
+docker run --rm -p 8000:10000 \ 
+  -e ENCRYPTION_KEY="your-strong-secret-key" \ 
+  -e RSA_PUBLIC_KEY_PATH="/app/config/jwt/public.pem" \ 
+  -e RSA_PRIVATE_KEY_PATH="/app/config/jwt/private.pem" \ 
+  encryption-demo:latest
+```
+3. Ouvrir : [http://localhost:8000](http://localhost:8000)
+
+## Traitement de fichiers différé
+Ce projet fournit désormais une file d'attente de jobs sur le système de fichiers pour les tâches de chiffrement/déchiffrement différées.
+
+- Écrire un job dans `var/encryption_jobs/` via l'API ou un producteur de tâches.
+- Démarrer le worker avec :
+  ```bash
+  php bin/console app:process-encryption-queue --once
+  ```
+- Pour exécuter en mode service continu :
+  ```bash
+  php bin/console app:process-encryption-queue
+  ```
+ - En démonstration, le serveur web peut déposer les uploads persistés dans `uploads/pending/` puis générer les fichiers chiffrés dans `uploads/queued/` après traitement du worker.
+
+## Kubernetes
+
+Les manifests de base sont disponibles dans le dossier `k8s/`.
+Ils comprennent :
+- `deployment.yaml`
+- `service.yaml`
+- `secret.yaml`
+
+Vous devez créer le secret Kubernetes avant de déployer le déploiement.
+
+### Exécuter les tests
+
+```bash
+vendor/bin/phpunit -c phpunit.xml.dist
+```
+
+> Remarque : la plateforme de test locale doit disposer des extensions `mbstring` et `curl` pour exécuter pleinement les validations et l'intégration Vault.

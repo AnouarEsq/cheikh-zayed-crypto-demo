@@ -12,7 +12,7 @@ Ce document synthétise les concepts cryptographiques et architecturaux mis en �
 
 ## 3. Chiffrement Asymétrique (RSA-4096)
 *   **Concept :** Utilise un système de bi-clés : une **clé publique** (diffusable, servant uniquement à chiffrer) et une **clé privée** (protégée, servant uniquement à déchiffrer).
-*   **Limite technique :** Le protocole RSA est très gourmand en ressources (lent) et ne peut mathématiquement chiffrer que des quantités de données inférieures à la taille de sa propre clé. Il est proscrit pour le chiffrement direct de gros fichiers.
+*   **Limite technique :** Le protocole RSA est très gourmand en ressources (lent) et ne peut mathématiquement chiffrer que des quantités de données inférieures à la taille de sa propre clé. Il quand est proscrit pour le chiffrement direct de gros fichiers.
 
 ## 4. Chiffrement Hybride (Enveloppe Cryptographique)
 *   **Concept :** Une technique de pointe qui fusionne les forces de l'AES (rapidité et traitement de données massives) et du RSA (distribution sécurisée des accès).

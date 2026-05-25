@@ -1,23 +1,38 @@
-FROM php:8.2-cli
+FROM php:8.4-cli AS build
 
-# Installation des dépendances système nécessaires pour Composer et Symfony
 RUN apt-get update && apt-get install -y \
-    unzip \
     git \
+    unzip \
     libzip-dev \
-    && docker-php-ext-install zip
+    libcurl4-openssl-dev \
+    libonig-dev \
+    ca-certificates \
+    && docker-php-ext-install zip mbstring curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copie de Composer depuis l'image officielle
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Définition du répertoire de travail
 WORKDIR /app
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader --classmap-authoritative
 
-# Copie de tous les fichiers du projet
 COPY . .
+RUN composer dump-autoload --no-dev --optimize --classmap-authoritative
 
-# Installation des dépendances avec Composer
-RUN composer install --no-dev --optimize-autoloader
+RUN useradd -u 1000 -m appuser && chown -R appuser:appuser /app
 
-# Démarrage du serveur PHP sur le port fourni par Render
-CMD php -S 0.0.0.0:${PORT:-10000} test_server.php
+FROM php:8.4-cli AS runtime
+RUN apt-get update && apt-get install -y \
+    libzip-dev \
+    libcurl4-openssl-dev \
+    libonig-dev \
+    ca-certificates \
+    && docker-php-ext-install zip mbstring curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=build /app /app
+USER appuser
+EXPOSE 10000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD php -l test_server.php || exit 1
+CMD ["php", "-S", "0.0.0.0:10000", "test_server.php"]

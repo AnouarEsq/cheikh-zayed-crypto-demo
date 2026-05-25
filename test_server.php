@@ -1,6 +1,8 @@
 <?php
-// Ensure errors are visible
-ini_set('display_errors', 1);
+declare(strict_types=1);
+
+session_start();
+ini_set('display_errors', '1');
 error_reporting(E_ALL);
 
 require_once __DIR__ . '/vendor/autoload.php';
@@ -8,25 +10,98 @@ require_once __DIR__ . '/vendor/autoload.php';
 use App\Encryption\Strategy\AesEncryptionStrategy;
 use App\Encryption\Strategy\RsaEncryptionStrategy;
 use App\Service\EncryptionService;
+use App\Secrets\LocalKeyProvider;
+use App\Queue\EncryptionJob;
+use App\Queue\FilesystemEncryptionQueue;
 
-$encryptionKey = "this-is-a-super-secret-test-key!";
-
-// Make sure keys directory exists
-$keysDir = __DIR__ . '/config/jwt';
-if (!is_dir($keysDir)) {
-    mkdir($keysDir, 0777, true);
+function buildCsrfToken(): string
+{
+    $token = bin2hex(random_bytes(32));
+    $_SESSION['csrf_token'] = $token;
+    return $token;
 }
 
-$privateKeyPath = $keysDir . '/private.pem';
-$publicKeyPath = $keysDir . '/public.pem';
+function validateCsrfToken(?string $token): bool
+{
+    return isset($_SESSION['csrf_token']) && is_string($token) && hash_equals($_SESSION['csrf_token'], $token);
+}
 
-// Generate dummy RSA keys if they don't exist
+function sanitizeFilename(string $name): string
+{
+    $name = preg_replace('/[^a-zA-Z0-9._-]/', '_', $name);
+    return substr($name, 0, 255);
+}
+
+function ensureUploadDir(string $baseDir): string
+{
+    if (!is_dir($baseDir)) {
+        mkdir($baseDir, 0700, true);
+    }
+    return $baseDir;
+}
+
+function ensureDirectory(string $path): string
+{
+    if (!is_dir($path)) {
+        mkdir($path, 0700, true);
+    }
+    return $path;
+}
+
+function isValidUpload(string $tmpName, string $originalName, int $size): bool
+{
+    if ($size === 0 || $size > 50 * 1024 * 1024) {
+        return false;
+    }
+
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $mimeType = finfo_file($finfo, $tmpName);
+    finfo_close($finfo);
+
+    $allowedMimeTypes = [
+        'text/plain',
+        'application/json',
+        'application/xml',
+        'text/xml',
+        'text/csv',
+        'text/markdown',
+        'application/pdf',
+        'application/octet-stream',
+    ];
+
+    if (!in_array($mimeType, $allowedMimeTypes, true)) {
+        return false;
+    }
+
+    $allowedExtensions = ['txt', 'md', 'json', 'xml', 'csv', 'pdf', 'enc'];
+    $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+
+    return in_array($extension, $allowedExtensions, true);
+}
+
+function scanUploadedFile(string $path): bool
+{
+    // Placeholder for malware scanning integration (ClamAV, commercial scanner, SaaS API)
+    // In production, this should call a secure scanning service and reject if suspicious.
+    return true;
+}
+
+$privateKeyPath = __DIR__ . '/config/jwt/private.pem';
+$publicKeyPath = __DIR__ . '/config/jwt/public.pem';
+
+$encryptionKey = getenv('ENCRYPTION_KEY') ?: 'this-is-a-super-secret-test-key!';
+
+$keysDir = __DIR__ . '/config/jwt';
+if (!is_dir($keysDir)) {
+    mkdir($keysDir, 0700, true);
+}
+
 if (!file_exists($privateKeyPath) || !file_exists($publicKeyPath)) {
     $minimalCnf = $keysDir . '/minimal_openssl.cnf';
-    $config = array(
-        "private_key_bits" => 4096,
-        "private_key_type" => OPENSSL_KEYTYPE_RSA,
-    );
+    $config = [
+        'private_key_bits' => 4096,
+        'private_key_type' => OPENSSL_KEYTYPE_RSA,
+    ];
     if (file_exists($minimalCnf)) {
         $config['config'] = $minimalCnf;
     }
@@ -36,18 +111,30 @@ if (!file_exists($privateKeyPath) || !file_exists($publicKeyPath)) {
         openssl_pkey_export($res, $privKey, null, $config);
         file_put_contents($privateKeyPath, $privKey);
         $pubKey = openssl_pkey_get_details($res);
-        file_put_contents($publicKeyPath, $pubKey["key"]);
+        file_put_contents($publicKeyPath, $pubKey['key']);
+        chmod($privateKeyPath, 0600);
     } else {
-        die("<h1>Erreur Critique:</h1><p>Impossible de générer les clés RSA. OpenSSL n'est pas bien configuré sur votre PHP Windows. " . openssl_error_string() . "</p>");
+        die('<h1>Erreur Critique:</h1><p>Impossible de générer les clés RSA. OpenSSL n\'est pas bien configuré sur votre PHP. ' . htmlspecialchars(openssl_error_string()) . '</p>');
     }
 }
 
-// Instantiate Strategies
-$aesStrategy = new AesEncryptionStrategy($encryptionKey);
-$rsaStrategy = new RsaEncryptionStrategy($publicKeyPath, $privateKeyPath);
+try {
+    $keyProvider = new LocalKeyProvider(
+        $encryptionKey,
+        $publicKeyPath,
+        $privateKeyPath,
+        getenv('RSA_PASSPHRASE') ?: null
+    );
+} catch (\Exception $e) {
+    die('<h1>Configuration critique manquante</h1><p>' . htmlspecialchars($e->getMessage()) . '</p>');
+}
 
+$aesStrategy = new AesEncryptionStrategy($keyProvider);
+$rsaStrategy = new RsaEncryptionStrategy($keyProvider);
 $service = new EncryptionService([$aesStrategy, $rsaStrategy]);
+$queue = new FilesystemEncryptionQueue(null, __DIR__ . '/var/encryption_jobs');
 
+$csrfToken = $_SESSION['csrf_token'] ?? buildCsrfToken();
 $originalData = '';
 $encryptedData = '';
 $decryptedData = '';
@@ -57,103 +144,151 @@ $algorithm = 'aes';
 $fileInfo = [];
 $currentTab = 'text';
 
+$securityHeaders = [
+    'X-Content-Type-Options: nosniff',
+    'X-Frame-Options: DENY',
+    'Referrer-Policy: no-referrer',
+    'Permissions-Policy: camera=(), microphone=(), geolocation=()',
+    "Content-Security-Policy: default-src 'none'; script-src 'none'; connect-src 'self'; img-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self';",
+];
+foreach ($securityHeaders as $header) {
+    header($header);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = $_POST['action'] ?? '';
-    $algorithm = $_POST['algorithm'] ?? 'aes';
-    
-    if ($action === 'encryptText' && !empty($_POST['data_to_encrypt'])) {
-        $currentTab = 'text';
-        $originalData = trim($_POST['data_to_encrypt']);
-        try {
-            $encryptedData = $service->encryptData($originalData, $algorithm);
-        } catch (\Exception $e) {
-            $error = $e->getMessage();
-        }
-    } 
-    elseif ($action === 'decryptText' && !empty($_POST['encrypted_data'])) {
-        $currentTab = 'text';
-        $encryptedData = $_POST['encrypted_data'];
-        try {
-            $decryptedData = $service->decryptData($encryptedData, $algorithm);
-        } catch (\Exception $e) {
-            $error = $e->getMessage();
-        }
-    } 
-    elseif ($action === 'encryptFile' && isset($_FILES['file_to_encrypt']) && $_FILES['file_to_encrypt']['error'] === UPLOAD_ERR_OK) {
-        $currentTab = 'encrypt_file';
-        try {
-            $uploadDir = __DIR__ . '/uploads';
-            if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
-            
-            $originalName = $_FILES['file_to_encrypt']['name'];
+        if (!validateCsrfToken($_POST['csrf'] ?? '')) {
+        $error = 'CSRF validation échouée. Rechargez la page et réessayez.';
+    } else {
+            $action = $_POST['submitAction'] ?? $_POST['action'] ?? '';
+        $algorithm = $_POST['algorithm'] ?? 'aes';
+
+        if ($action === 'encryptText' && !empty($_POST['data_to_encrypt'])) {
+            $currentTab = 'text';
+            $originalData = trim($_POST['data_to_encrypt']);
+            try {
+                $encryptedData = $service->encryptData($originalData, $algorithm);
+            } catch (\Exception $e) {
+                $error = $e->getMessage();
+            }
+        } elseif ($action === 'decryptText' && !empty($_POST['encrypted_data'])) {
+            $currentTab = 'text';
+            $encryptedData = trim($_POST['encrypted_data']);
+            try {
+                $decryptedData = $service->decryptData($encryptedData, $algorithm);
+            } catch (\Exception $e) {
+                $error = $e->getMessage();
+            }
+        } elseif ($action === 'encryptFile' && isset($_FILES['file_to_encrypt']) && $_FILES['file_to_encrypt']['error'] === UPLOAD_ERR_OK) {
+            $currentTab = 'encrypt_file';
             $tmpName = $_FILES['file_to_encrypt']['tmp_name'];
-            $fileSize = $_FILES['file_to_encrypt']['size'];
-            
-            $encPath = $uploadDir . '/' . uniqid() . '-' . $originalName . '.enc';
-            
-            $service->encryptFile($tmpName, $encPath, $algorithm);
-            
-            $fileInfo = [
-                'name' => $originalName,
-                'size' => round($fileSize / 1024, 2) . ' KB',
-                'encPath' => str_replace('\\', '/', $encPath),
-                'encSize' => round(filesize($encPath) / 1024, 2) . ' KB',
-            ];
-        } catch (\Exception $e) {
-            $error = $e->getMessage();
-        }
-    }
-    elseif ($action === 'decryptFileNow' && !empty($_POST['encPath'])) {
-        $currentTab = 'encrypt_file';
-        $encPath = $_POST['encPath'];
-        $originalName = $_POST['originalName'] ?? 'file.txt';
-        try {
-            if (!file_exists($encPath)) throw new \Exception("Fichier chiffré introuvable : " . $encPath);
-            
-            $encryptedContent = file_get_contents($encPath);
-            
-            // Envoyer au navigateur de l'utilisateur directement la version ENCRYPTÉE
-            header('Content-Description: File Transfer');
-            header('Content-Type: application/octet-stream');
-            header('Content-Disposition: attachment; filename="encrypted_' . basename($originalName) . '.enc"');
-            header('Expires: 0');
-            header('Cache-Control: must-revalidate');
-            header('Pragma: public');
-            header('Content-Length: ' . strlen($encryptedContent));
-            
-            if (ob_get_length()) ob_clean();
-            echo $encryptedContent;
-            exit;
-        } catch (\Exception $e) {
-            $error = $e->getMessage();
-        }
-    }
-    elseif ($action === 'uploadDecrypt' && isset($_FILES['file_to_decrypt']) && $_FILES['file_to_decrypt']['error'] === UPLOAD_ERR_OK) {
-        $currentTab = 'decrypt_file';
-        try {
+            $originalName = sanitizeFilename($_FILES['file_to_encrypt']['name']);
+            $fileSize = (int) $_FILES['file_to_encrypt']['size'];
+
+            if (!isValidUpload($tmpName, $originalName, $fileSize)) {
+                $error = 'Type de fichier non autorisé ou taille excessive.';
+            } elseif (!scanUploadedFile($tmpName)) {
+                $error = 'Le fichier est suspect ou a échoué la vérification de sécurité.';
+            } else {
+                try {
+                    $uploadDir = ensureUploadDir(__DIR__ . '/uploads');
+                    $encPath = $uploadDir . '/' . uniqid('enc_', true) . '-' . $originalName . '.enc';
+                    $service->encryptFile($tmpName, $encPath, $algorithm);
+                    $fileInfo = [
+                        'name' => $originalName,
+                        'size' => round($fileSize / 1024, 2) . ' KB',
+                        'encPath' => $encPath,
+                        'encSize' => round(filesize($encPath) / 1024, 2) . ' KB',
+                    ];
+                } catch (\Exception $e) {
+                    $error = $e->getMessage();
+                }
+            }
+        } elseif ($action === 'enqueueEncryptFile' && isset($_FILES['file_to_encrypt']) && $_FILES['file_to_encrypt']['error'] === UPLOAD_ERR_OK) {
+            $currentTab = 'encrypt_file';
+            $tmpName = $_FILES['file_to_encrypt']['tmp_name'];
+            $originalName = sanitizeFilename($_FILES['file_to_encrypt']['name']);
+            $fileSize = (int) $_FILES['file_to_encrypt']['size'];
+
+            if (!isValidUpload($tmpName, $originalName, $fileSize)) {
+                $error = 'Type de fichier non autorisé ou taille excessive.';
+            } elseif (!scanUploadedFile($tmpName)) {
+                $error = 'Le fichier est suspect ou a échoué la vérification de sécurité.';
+            } else {
+                try {
+                    $pendingDir = ensureDirectory(__DIR__ . '/uploads/pending');
+                    $queuedDir = ensureDirectory(__DIR__ . '/uploads/queued');
+                    $persistedSource = $pendingDir . '/' . uniqid('pending_', true) . '-' . $originalName;
+                    if (!move_uploaded_file($tmpName, $persistedSource)) {
+                        if (!copy($tmpName, $persistedSource)) {
+                            throw new \Exception('Impossible de persister le fichier uploadé.');
+                        }
+                    }
+
+                    $outputPath = $queuedDir . '/' . uniqid('enc_', true) . '-' . $originalName . '.enc';
+                    $job = new EncryptionJob(EncryptionJob::ACTION_ENCRYPT, $persistedSource, $outputPath, $algorithm);
+                    $jobFile = $queue->enqueue($job);
+
+                    $fileInfo = [
+                        'name' => $originalName,
+                        'size' => round($fileSize / 1024, 2) . ' KB',
+                        'queuedJob' => basename($jobFile),
+                        'outputPath' => $outputPath,
+                    ];
+                } catch (\Exception $e) {
+                    $error = $e->getMessage();
+                }
+            }
+        } elseif ($action === 'downloadEncrypted' && !empty($_POST['encPath'])) {
+            $currentTab = 'encrypt_file';
+            $encPath = $_POST['encPath'];
+            $originalName = sanitizeFilename($_POST['originalName'] ?? 'file.txt');
+            if (!file_exists($encPath) || strpos(realpath($encPath), realpath(__DIR__ . '/uploads')) !== 0) {
+                $error = 'Fichier chiffré non valide.';
+            } else {
+                $encryptedContent = file_get_contents($encPath);
+                header('Content-Description: File Transfer');
+                header('Content-Type: application/octet-stream');
+                header('Content-Disposition: attachment; filename="encrypted_' . basename($originalName) . '.enc"');
+                header('Expires: 0');
+                header('Cache-Control: must-revalidate');
+                header('Pragma: public');
+                header('Content-Length: ' . strlen($encryptedContent));
+                if (ob_get_length()) {
+                    ob_clean();
+                }
+                echo $encryptedContent;
+                exit;
+            }
+        } elseif ($action === 'uploadDecrypt' && isset($_FILES['file_to_decrypt']) && $_FILES['file_to_decrypt']['error'] === UPLOAD_ERR_OK) {
+            $currentTab = 'decrypt_file';
             $tmpName = $_FILES['file_to_decrypt']['tmp_name'];
-            $originalName = $_FILES['file_to_decrypt']['name'];
-            
-            // Le fichier decrypté s'appellera decrypted_ + le nom original (on enlève .enc si ça se termine par .enc)
-            $cleanName = str_replace('.enc', '', basename($originalName));
-            
-            $encryptedContent = file_get_contents($tmpName);
-            $decryptedContent = $service->decryptData($encryptedContent, $algorithm);
-            
-            // Envoyer au navigateur de l'utilisateur directement
-            header('Content-Description: File Transfer');
-            header('Content-Type: application/octet-stream');
-            header('Content-Disposition: attachment; filename="decrypted_imported_' . $cleanName . '"');
-            header('Expires: 0');
-            header('Cache-Control: must-revalidate');
-            header('Pragma: public');
-            header('Content-Length: ' . strlen($decryptedContent));
-            
-            if (ob_get_length()) ob_clean();
-            echo $decryptedContent;
-            exit;
-        } catch (\Exception $e) {
-            $error = $e->getMessage();
+            $originalName = sanitizeFilename($_FILES['file_to_decrypt']['name']);
+            $fileSize = (int) $_FILES['file_to_decrypt']['size'];
+
+            if (!isValidUpload($tmpName, $originalName, $fileSize)) {
+                $error = 'Type de fichier non autorisé ou taille excessive.';
+            } elseif (!scanUploadedFile($tmpName)) {
+                $error = 'Le fichier est suspect ou a échoué la vérification de sécurité.';
+            } else {
+                try {
+                    $cleanName = preg_replace('/\.enc$/i', '', $originalName);
+                    $decryptedContent = $service->decryptData(file_get_contents($tmpName), $algorithm);
+                    header('Content-Description: File Transfer');
+                    header('Content-Type: application/octet-stream');
+                    header('Content-Disposition: attachment; filename="decrypted_' . basename($cleanName) . '"');
+                    header('Expires: 0');
+                    header('Cache-Control: must-revalidate');
+                    header('Pragma: public');
+                    header('Content-Length: ' . strlen($decryptedContent));
+                    if (ob_get_length()) {
+                        ob_clean();
+                    }
+                    echo $decryptedContent;
+                    exit;
+                } catch (\Exception $e) {
+                    $error = $e->getMessage();
+                }
+            }
         }
     }
 }
@@ -491,6 +626,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <div id="section_text" class="form-section <?= $currentTab === 'text' ? 'active' : '' ?>">
             <form method="POST" action="">
+                <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrfToken) ?>">
                 <input type="hidden" name="action" value="encryptText">
                 <div class="algo-selector">
                     <label>Algorithme de Sécurité :</label>
@@ -510,6 +646,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="crypto-box" style="word-break: break-all;"><?= htmlspecialchars($encryptedData) ?></div>
                 
                 <form method="POST" action="">
+                    <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrfToken) ?>">
                     <input type="hidden" name="action" value="decryptText">
                     <input type="hidden" name="algorithm" value="<?= $algorithm ?>">
                     <input type="hidden" name="encrypted_data" value="<?= htmlspecialchars($encryptedData) ?>">
@@ -526,6 +663,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <div id="section_encrypt_file" class="form-section <?= $currentTab === 'encrypt_file' ? 'active' : '' ?>">
             <form method="POST" action="" enctype="multipart/form-data">
+                <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrfToken) ?>">
                 <input type="hidden" name="action" value="encryptFile">
                 <div class="algo-selector">
                     <label>Algorithme de Sécurité pour les Fichiers :</label>
@@ -536,30 +674,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
                 <h3><span class="step-badge">1</span> Uploader un fichier médical</h3>
                 <input type="file" name="file_to_encrypt" required>
-                <button type="submit">🔒 Chiffrer le document</button>
+                <button type="submit" name="submitAction" value="encryptFile">🔒 Chiffrer le document</button>
+                <button type="submit" name="submitAction" value="enqueueEncryptFile" class="btn-secondary">⏳ Mettre en file d'attente</button>
             </form>
 
-            <?php if ($action === 'encryptFile' && !empty($fileInfo) && !$error): ?>
+            <?php if (in_array($action, ['encryptFile', 'enqueueEncryptFile'], true) && !empty($fileInfo) && !$error): ?>
                 <hr>
                 <h3>Document Sécurisé et Archivé (<?= strtoupper($algorithm) ?>)</h3>
                 <div class="crypto-box">
-                    <strong>Fichier généré :</strong> <?= htmlspecialchars(basename($fileInfo['encPath'])) ?><br><br>
-                    <strong>Chemin d'archivage :</strong> <?= htmlspecialchars($fileInfo['encPath']) ?><br><br>
-                    <strong>Taille sur disque :</strong> <?= $fileInfo['encSize'] ?> 
+                    <?php if ($action === 'encryptFile'): ?>
+                        <strong>Fichier généré :</strong> <?= htmlspecialchars(basename($fileInfo['encPath'])) ?><br><br>
+                        <strong>Chemin d'archivage :</strong> <?= htmlspecialchars($fileInfo['encPath']) ?><br><br>
+                        <strong>Taille sur disque :</strong> <?= $fileInfo['encSize'] ?>
+                    <?php else: ?>
+                        <strong>Statut :</strong> Job d’encryption envoyé en file d’attente.<br><br>
+                        <strong>Nom du job :</strong> <?= htmlspecialchars($fileInfo['queuedJob']) ?><br><br>
+                        <strong>Destination prévue :</strong> <?= htmlspecialchars($fileInfo['outputPath']) ?>
+                    <?php endif; ?>
                 </div>
                 
-                <form method="POST" action="">
-                    <input type="hidden" name="action" value="decryptFileNow">
-                    <input type="hidden" name="algorithm" value="<?= $algorithm ?>">
-                    <input type="hidden" name="encPath" value="<?= htmlspecialchars($fileInfo['encPath']) ?>">
-                    <input type="hidden" name="originalName" value="<?= htmlspecialchars($fileInfo['name']) ?>">
-                    <button type="submit" class="btn-green">⬇️ Télécharger le fichier encrypté</button>
-                </form>
+                <?php if ($action === 'encryptFile'): ?>
+                    <form method="POST" action="">
+                        <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrfToken) ?>">
+                        <input type="hidden" name="action" value="downloadEncrypted">
+                        <input type="hidden" name="algorithm" value="<?= $algorithm ?>">
+                        <input type="hidden" name="encPath" value="<?= htmlspecialchars($fileInfo['encPath']) ?>">
+                        <input type="hidden" name="originalName" value="<?= htmlspecialchars($fileInfo['name']) ?>">
+                        <button type="submit" class="btn-green">⬇️ Télécharger le fichier encrypté</button>
+                    </form>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
 
         <div id="section_decrypt_file" class="form-section <?= $currentTab === 'decrypt_file' ? 'active' : '' ?>">
             <form method="POST" action="" enctype="multipart/form-data">
+                <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrfToken) ?>">
                 <input type="hidden" name="action" value="uploadDecrypt">
                 <div class="algo-selector">
                     <label>Protocole de déchiffrement requis :</label>

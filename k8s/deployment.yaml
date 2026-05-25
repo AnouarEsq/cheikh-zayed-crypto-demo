@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: encryption-demo
+  labels:
+    app: encryption-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: encryption-demo
+  template:
+    metadata:
+      labels:
+        app: encryption-demo
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: encryption-demo
+          image: ghcr.io/your-org/encryption-demo:latest
+          ports:
+            - containerPort: 10000
+          env:
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: encryption-demo-secrets
+                  key: ENCRYPTION_KEY
+            - name: RSA_PASSPHRASE
+              valueFrom:
+                secretKeyRef:
+                  name: encryption-demo-secrets
+                  key: RSA_PASSPHRASE
+            - name: RSA_PUBLIC_KEY_PATH
+              value: "/app/config/jwt/public.pem"
+            - name: RSA_PRIVATE_KEY_PATH
+              value: "/app/config/jwt/private.pem"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 10000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 10000
+            initialDelaySeconds: 20
+            periodSeconds: 20

@@ -1,0 +1,141 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{geometry}
+\geometry{a4paper, margin=2cm}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\lstset{
+    language=PHP,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!60!black},
+    stringstyle=\color{red},
+    breaklines=true,
+    captionpos=b,
+    numbers=left,
+    numberstyle=\tiny,
+    frame=single
+}
+
+\title{Documentation des Fonctionnalités et Cycle de Vie du Projet de Chiffrement Médical}
+\author{Étudiant Ingénieur - Abulcasis, Rabat \\ Stage à la Fondation Cheikh Zayed}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Ce document décrit de manière exhaustive les fonctionnalités, concepts et cycle de vie du projet de chiffrement des données médicales pour la Fondation Cheikh Zayed. Il couvre tout le processus de A à Z, incluant les améliorations suggérées pour la mise en production.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Cycle de Vie du Projet : De A à Z}
+
+\subsection{Phase de Conception (A - Analyse et Design)}
+Le projet débute par l'identification des besoins en sécurité pour les données médicales sensibles. Les concepts clés incluent :
+\begin{itemize}
+    \item \textbf{Patron Strategy} : Séparation des algorithmes de chiffrement (AES, RSA) pour une interchangeabilité dynamique.
+    \item \textbf{Chiffrement Symétrique (AES-256-GCM)} : Pour rapidité et authenticité (mode AEAD).
+    \item \textbf{Chiffrement Asymétrique (RSA-4096)} : Pour distribution sécurisée des clés.
+    \item \textbf{Chiffrement Hybride} : Combinaison AES + RSA pour les gros fichiers médicaux.
+    \item \textbf{Injection de Dépendances} : Gestion des clés via conteneur Symfony.
+    \item \textbf{Transparence ORM} : Chiffrement automatique via Doctrine Event Subscribers.
+\end{itemize}
+
+\subsection{Phase de Développement (B - Implémentation)}
+Implémentation en Symfony 8 avec PHP 8.4 :
+\begin{itemize}
+    \item \textbf{EncryptionService} : Service central gérant les stratégies via tagged iterators.
+    \item \textbf{Strategies} : AesEncryptionStrategy et RsaEncryptionStrategy.
+    \item \textbf{Attribute Encrypted} : Annotation pour marquer les champs sensibles.
+    \item \textbf{EncryptionSubscriber} : Hooks Doctrine pour chiffrement/déchiffrement transparent.
+    \item \textbf{Entity Patient} : Exemple avec champs chiffrés (socialSecurityNumber en AES, medicalRecord en RSA).
+\end{itemize}
+
+\subsection{Phase de Configuration (C - Setup)}
+\begin{itemize}
+    \item Génération de clés RSA via OpenSSL.
+    \item Variables d'environnement (.env) pour clés AES et chemins RSA.
+    \item Configuration Doctrine et services Symfony.
+\end{itemize}
+
+\subsection{Phase de Test (D - Validation)}
+\begin{itemize}
+    \item \textbf{TestEncryptionController} : Test unitaire via route Symfony.
+    \item \textbf{test\_server.php} : Serveur de démonstration pour chiffrement texte/fichiers.
+    \item File d'attente de jobs et worker asynchrone pour le chiffrement/déchiffrement différé de fichiers.
+    \item Streaming pour traitement de fichiers lourds sans charger entièrement la mémoire.
+    \item Génération de fichiers de test médicaux réalistes (generate\_test\_files.php).
+    \item Interface web pour upload/chiffrement/déchiffrement.
+\end{itemize}
+
+\subsection{Phase de Déploiement (E - Production)}
+\begin{itemize}
+    \item \textbf{Dockerfile} : Conteneurisation avec PHP 8.4.
+    \item Serveur de test local (php -S).
+    \item Préparation pour déploiement cloud (e.g., Render).
+\end{itemize}
+
+\subsection{Phase d'Amélioration (F - Optimisations pour Production)}
+Améliorations suggérées pour sécurité, flexibilité et conformité :
+\begin{itemize}
+    \item Correction du padding RSA (PKCS1 vers OAEP).
+    \item Gestion avancée des clés (KMS/Vault abstraction, fournisseurs locaux et prêts pour HSM).
+    \item Enveloppe de payload chiffrée structurée et versionnée.
+    \item Streaming pour gros fichiers et pipeline de traitement sécurisé.
+    \item File d'attente de jobs asynchrone et worker de traitement de fichiers.
+    \item Authentification et audit logging.
+    \item Tests unitaires avec PHPUnit.
+    \item Conteneurisation durcie et CI/CD GitHub Actions.
+    \item Préparation Kubernetes et déploiement cloud natif.
+    \item Conformité RGPD/Maroc.
+\end{itemize}
+
+\section{Fonctionnalités Existantes}
+\begin{itemize}
+    \item Chiffrement/déchiffrement de texte et fichiers.
+    \item Support multi-algorithmes (AES/RSA).
+    \item Intégration ORM transparente.
+    \item Interface de démonstration web.
+    \item Génération automatique de clés.
+    \item Fichiers de test médicaux.
+\end{itemize}
+
+\section{Concepts Clés}
+\begin{itemize}
+    \item \textbf{Confidentialité} : Données illisibles sans clé.
+    \item \textbf{Intégrité/Authenticité} : Via GCM et signatures potentielles.
+    \item \textbf{Performance} : AES rapide, RSA pour clés seulement.
+    \item \textbf{Évolutivité} : Pattern Strategy extensible.
+    \item \textbf{Sécurité} : Défense en profondeur (chiffrement + accès).
+\end{itemize}
+
+\section{Archive des Tâches et Améliorations}
+Cette section archive les tâches assignées et réalisées pour améliorer le projet.
+
+\subsection{Tâche 1 : Correction du Padding RSA}
+\textbf{Description} : Remplacer PKCS1 par OAEP pour renforcer la sécurité RSA. \\
+\textbf{Statut} : Implémenté (RSA-OAEP appliqué dans `src/Encryption/Strategy/RsaEncryptionStrategy.php`). \\
+\textbf{Date} : \today \\
+\textbf{Détails} : `RsaEncryptionStrategy` utilise désormais OAEP padding (`OPENSSL_PKCS1_OAEP_PADDING`), `random_bytes()` pour la génération de clés AES/IV, et effacement mémoire (`sodium_memzero`) lorsque disponible. Voir `src/Encryption/Strategy/RsaEncryptionStrategy.php`.
+
+\subsection{Tâche 2 : Enveloppe AES et abstraction de gestion des clés}
+\textbf{Description} : Renforcer la structure des payloads chiffrés et préparer l'intégration KMS/Vault. \\
+\textbf{Statut} : Implémenté partiellement (enveloppe versionnée et `LocalKeyProvider` abstrait l'accès aux clés). \\
+\textbf{Date} : \today \\
+\textbf{Détails} : `AesEncryptionStrategy` et `RsaEncryptionStrategy` utilisent désormais `src/Encryption/Model/EncryptedPayload.php` pour un format payload structuré et versionné. `src/Secrets/LocalKeyProvider.php` implémente `KeyManagementInterface`, et `src/Secrets/VaultKeyProvider.php` expose une architecture prête pour HashiCorp Vault.
+
+\subsection{Tâche 3 : Conteneurisation et pipeline CI/CD}
+\textbf{Description} : Mettre en place un Dockerfile durci et un workflow de build/test automatique. \\
+\textbf{Statut} : Implémenté (PHP 8.4, extensions de production, non root, GitHub Actions CI, manifests Kubernetes de base). \\
+\textbf{Date} : \today \\
+\textbf{Détails} : `Dockerfile` a été mis à jour pour une image de production PHP 8.4 avec `mbstring`, `curl`, `zip`, `HEALTHCHECK` et utilisateur non privilégié. `/.github/workflows/ci.yml` contient des étapes de validation composer, tests PHPUnit, analyse de sécurité et vérification de syntaxe. `k8s/` stocke des manifests de déploiement, service et secret pour l'orchestration cloud.
+
+\end{document}

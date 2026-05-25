@@ -8,3 +8,8 @@ uploads/
 /var/
 /vendor/
 .phpunit.result.cache
+
+###> phpunit/phpunit ###
+/phpunit.xml
+/.phpunit.cache/
+###< phpunit/phpunit ###

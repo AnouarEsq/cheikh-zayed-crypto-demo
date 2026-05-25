@@ -3,6 +3,7 @@
 namespace App\Service;
 
 use App\Encryption\EncryptionStrategyInterface;
+use App\Queue\EncryptionJob;
 use Exception;
 use Symfony\Component\DependencyInjection\Attribute\TaggedIterator;
 
@@ -38,6 +39,21 @@ class EncryptionService
     public function decryptData(string $encryptedData, string $algorithm = 'aes'): string
     {
         return $this->getStrategy($algorithm)->decryptData($encryptedData);
+    }
+
+    public function processJob(EncryptionJob $job): void
+    {
+        if ($job->getAction() === EncryptionJob::ACTION_ENCRYPT) {
+            $this->encryptFile($job->getSourcePath(), $job->getDestinationPath(), $job->getAlgorithm());
+            return;
+        }
+
+        if ($job->getAction() === EncryptionJob::ACTION_DECRYPT) {
+            $this->decryptFile($job->getSourcePath(), $job->getDestinationPath(), $job->getAlgorithm());
+            return;
+        }
+
+        throw new Exception('Unsupported encryption job action: ' . $job->getAction());
     }
 
     public function encryptFile(string $sourcePath, string $destinationPath, string $algorithm = 'aes'): void

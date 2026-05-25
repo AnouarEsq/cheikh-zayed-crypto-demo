@@ -1,0 +1,13 @@
+vendor/
+.git/
+.gitignore
+tests/
+node_modules/
+var/
+.phpunit.result.cache
+*.log
+*.sql
+*.sqlite
+.DS_Store
+.env
+.env.local

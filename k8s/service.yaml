@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: encryption-demo
+  labels:
+    app: encryption-demo
+spec:
+  type: ClusterIP
+  selector:
+    app: encryption-demo
+  ports:
+    - port: 80
+      targetPort: 10000
+      protocol: TCP
+      name: http
