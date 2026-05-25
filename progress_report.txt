@@ -1,0 +1,42 @@
+Progress report: Encryption demo -> production readiness
+
+Date: 2026-05-25
+Author: Abulcasis (stage)
+
+Summary:
+- Objective: Transform the Symfony encryption demo into a production-grade, cloud-native, healthcare-compliant platform.
+- Current status: Major crypto hardening and infra work completed locally; unit tests passing.
+
+Completed highlights:
+- Switched RSA padding to OAEP (RSA-OAEP) and hardened AES to AES-256-GCM.
+- Implemented a versioned encrypted payload envelope (`src/Encryption/Model/EncryptedPayload.php`).
+- Added streaming encrypt/decrypt APIs and file wrappers for large files.
+- Introduced `KeyManagementInterface` with `LocalKeyProvider` and a Vault provider scaffold.
+- Implemented a filesystem-backed job queue and `ProcessEncryptionQueueCommand` worker for async file processing.
+- Updated `test_server.php` demo to enqueue jobs and persist uploads.
+- Added unit tests for AES and RSA strategies and the filesystem queue; all tests pass locally (10 tests, 33 assertions).
+- Upgraded PHPUnit to 10.5 and migrated `phpunit.xml.dist` to remove deprecations.
+- Updated `.github/workflows/ci.yml` to build the project's Dockerfile in CI.
+
+Pending / Next actions (priority):
+1) Vault/KMS integration (remove local key fallback) — requires Vault credentials and env setup.
+2) CI run to validate Docker build and tests remotely (GitHub Actions will run the Docker build step added to CI).
+3) Observability and audit logging (structured, tamper-evident logs) for compliance.
+4) Replace filesystem queue with managed broker (RabbitMQ/Redis) for scale (optional future work).
+
+Notes for the professor:
+- Local environment required `ext-mbstring` and `OPENSSL_CONF` adjustments on Windows to run tests.
+- Docker build was added to CI; Docker daemon was unavailable locally during the audit, so CI should validate containerized build.
+
+Files changed / added (high level):
+- src/Encryption/Strategy/* (RSA/AES strategy hardening + stream APIs)
+- src/Encryption/Model/EncryptedPayload.php (versioned envelope)
+- src/Secrets/* (KeyManagementInterface, LocalKeyProvider, VaultKeyProvider scaffold)
+- src/Queue/* (Filesystem queue + EncryptionJob DTO)
+- src/Command/ProcessEncryptionQueueCommand.php
+- test_server.php (demo UI + enqueue logic)
+- tests/* (unit tests for strategies and queue)
+- Dockerfile (production hardening, mbstring install)
+- .github/workflows/ci.yml (build + tests)
+
+If you want, I can push these commits to the remote and open a PR, or I can prepare a short presentation PDF derived from these notes.

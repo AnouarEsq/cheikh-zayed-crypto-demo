@@ -1,0 +1,39 @@
+Architecture summary — Encryption Demo (production-readiness)
+
+Overview:
+This project implements a hybrid encryption architecture designed for secure handling of medical data. It separates key management, encryption strategies, and processing pipelines to enable cloud-native deployment and compliance.
+
+Components:
+- Strategy Layer: `src/Encryption/Strategy/`
+  - `AesEncryptionStrategy`: AES-256-GCM (AEAD) for symmetric data encryption and streaming APIs.
+  - `RsaEncryptionStrategy`: RSA-4096 for key envelope encryption, using RSA-OAEP padding.
+- Payload Model: `src/Encryption/Model/EncryptedPayload.php` — versioned binary envelope that stores algorithm, encrypted AES key, IV, tag and ciphertext. Enables forward/backward compatibility.
+- Key Management: `src/Secrets/KeyManagementInterface.php` and providers:
+  - `LocalKeyProvider`: development/local key retrieval.
+  - `VaultKeyProvider`: scaffold for HashiCorp Vault/HSM integration in production.
+- Service Layer: `src/Service/EncryptionService.php` — orchestrates strategy selection and exposes high-level encrypt/decrypt operations and `processJob()` for queued work.
+- Async Pipeline / Queue:
+  - `src/Queue/FilesystemEncryptionQueue.php`: filesystem-backed queue for queued file processing (enqueue, fetchPendingJobs, acknowledge).
+  - `src/Command/ProcessEncryptionQueueCommand.php`: worker to process queued encryption jobs.
+- Persistence/ORM Integration:
+  - `src/EventSubscriber/EncryptionSubscriber.php`: Doctrine event subscriber for transparent entity field encryption.
+- Demo & Uploads:
+  - `test_server.php`: demo server to upload files, enqueue encryption jobs, and download decrypted outputs for verification.
+
+Security & Compliance Considerations:
+- Strong primitives: AES-256-GCM for AEAD, RSA-OAEP for key encryption.
+- Memory hygiene: uses `sodium_memzero()` where available to clear key material.
+- Key lifecycle: integrate with Vault/HSM for production; rotate keys and maintain audit logs.
+- Audit Logging & Monitoring: add structured logs (JSON), access logs, and alerting for suspicious operations.
+
+Deployment & CI:
+- Dockerfile: multi-stage hardened image with least-privilege user and `HEALTHCHECK`.
+- CI: GitHub Actions workflow builds the Docker image and runs unit tests; recommend secrets for Vault in CI to run integration tests.
+
+Scaling notes:
+- Replace filesystem queue with a managed broker (RabbitMQ, Redis Streams, or cloud-managed pub/sub) for high throughput and durability.
+- Offload heavy file processing to worker nodes and store encrypted blobs in object storage (S3-compatible).
+
+Contact / Next steps:
+- Integrate Vault credentials and rotate local fallback to disabled in production.
+- Add structured audit logs and export to SIEM for compliance.
